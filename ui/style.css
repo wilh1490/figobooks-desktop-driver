@@ -1,0 +1,451 @@
+/* FigoBooks Printer Driver — Setup Wizard Styles */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --brand:   #2234FD;
+  --brand-light: #e8ebff;
+  --success: #22c55e;
+  --danger:  #ef4444;
+  --text:    #0f1117;
+  --muted:   #6b7280;
+  --border:  #e5e7eb;
+  --bg:      #f9fafb;
+  --radius:  14px;
+  --font:    'DM Sans', system-ui, sans-serif;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Shell ─────────────────────────────────────────────────────── */
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 24px 48px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* ── Step dots ─────────────────────────────────────────────────── */
+.steps {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 40px;
+}
+
+.step {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.3s, width 0.3s;
+}
+
+.step.active {
+  background: var(--brand);
+  width: 24px;
+  border-radius: 4px;
+}
+
+/* ── Screens ───────────────────────────────────────────────────── */
+.screen {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  flex: 1;
+  gap: 16px;
+  animation: fadeUp 0.35s ease;
+}
+
+.screen.active { display: flex; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* ── Typography ────────────────────────────────────────────────── */
+h1 {
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.5px;
+}
+
+p {
+  font-size: 1rem;
+  color: var(--muted);
+  line-height: 1.6;
+  max-width: 360px;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.skip-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin-top: -8px;
+}
+
+.skip-link:hover { color: var(--brand); }
+
+/* ── Brand header (welcome screen) ────────────────────────────── */
+.brand-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.brand-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.brand-wordmark {
+  width: 160px;
+  object-fit: contain;
+  opacity: 0.92;
+}
+
+/* Small logo shown at top of inner screens */
+.screen-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  opacity: 0.85;
+  margin-bottom: -4px;
+}
+
+/* ── Done screen logo + checkmark overlay ──────────────────────── */
+.done-logo-wrap {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  margin-bottom: 8px;
+}
+
+.done-logo {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+}
+
+.done-check {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  width: 26px;
+  height: 26px;
+  background: var(--success);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+}
+
+/* ── Icon wrap ─────────────────────────────────────────────────── */
+.icon-wrap {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 8px;
+}
+
+.icon-wrap svg { width: 100%; height: 100%; }
+
+/* Spinning scan icon */
+.spin-wrap svg { animation: spin 1.8s linear infinite; }
+.spin-wrap.done svg { animation: none; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+.btn-primary,
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 32px;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.2s, transform 0.1s;
+  min-width: 140px;
+  width: 100%;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) { opacity: 0.88; }
+.btn-primary:active:not(:disabled) { transform: scale(0.97); }
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  background: #fff;
+  color: var(--text);
+  border: 2px solid var(--border);
+}
+
+.btn-outline:hover { border-color: var(--brand); color: var(--brand); }
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 12px 32px;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  transition: color 0.15s;
+  margin-top: 4px;
+}
+.btn-ghost:hover:not(:disabled) { color: var(--brand); }
+.btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.row {
+  display: flex;
+  width: 100%;
+}
+
+.row.gap { gap: 12px; margin-top: auto; padding-top: 24px; }
+
+/* ── Bluetooth warning card ────────────────────────────────────── */
+.bt-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  background: #fff7ed;
+  border: 1.5px solid #fed7aa;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.bt-warning-icon {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  color: #ea580c;
+  margin-top: 2px;
+}
+
+.bt-warning-icon svg { width: 100%; height: 100%; }
+
+.bt-warning strong {
+  font-size: 0.9rem;
+  color: #9a3412;
+  display: block;
+  margin-bottom: 3px;
+}
+
+.bt-warning p {
+  font-size: 0.82rem;
+  color: #c2410c;
+  line-height: 1.45;
+  max-width: unset;
+  margin: 0;
+}
+
+/* ── Signal strength badge ────────────────────────────────────── */
+.signal-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.signal-excellent { background: #f0fdf4; color: #166534; }
+.signal-good      { background: #f0fdf4; color: #166534; }
+.signal-fair      { background: #fefce8; color: #854d0e; }
+.signal-weak      { background: #fff1f2; color: #9f1239; }
+
+/* ── Printer list / card ───────────────────────────────────────── */
+.printer-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.printer-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  text-align: left;
+}
+
+.printer-card:hover { border-color: var(--brand); }
+
+.printer-card.selected {
+  border-color: var(--brand);
+  background: var(--brand-light);
+}
+
+.printer-card .printer-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  background: var(--brand-light);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.printer-card .printer-icon svg { width: 22px; height: 22px; }
+.printer-card .printer-icon .y50-img { width: 36px; height: 36px; object-fit: contain; }
+
+.printer-info { flex: 1; }
+.printer-name { font-weight: 600; font-size: 0.95rem; }
+.printer-meta { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+.printer-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 20px;
+}
+
+.badge-ble { background: #ede9fe; color: #7c3aed; }
+.badge-usb { background: #fef3c7; color: #92400e; }
+
+/* ── Scan status bar ───────────────────────────────────────────── */
+.scan-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex-shrink: 0;
+}
+
+.dot.pulse { animation: pulse 1.2s ease infinite; }
+.dot.success { background: var(--success); animation: none; }
+.dot.error { background: var(--danger); animation: none; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* ── Test result ───────────────────────────────────────────────── */
+.test-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-weight: 500;
+  width: 100%;
+}
+
+.test-result.ok {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1.5px solid #bbf7d0;
+}
+
+.test-result.fail {
+  background: #fff1f2;
+  color: #9f1239;
+  border: 1.5px solid #fecdd3;
+}
+
+/* ── Done card ─────────────────────────────────────────────────── */
+.done-card {
+  width: 100%;
+  background: #fff;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.done-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  font-size: 0.9rem;
+}
+
+.done-row + .done-row { border-top: 1px solid var(--border); }
+.done-row span { color: var(--muted); }
+
+.status-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.status-badge.connected { background: #f0fdf4; color: #166534; }
+.status-badge.disconnected { background: #fff1f2; color: #9f1239; }
+
+/* ── Mobile touch ─────────────────────────────────────────────── */
+@media (max-width: 420px) {
+  .shell { padding: 24px 16px 40px; }
+  h1 { font-size: 1.4rem; }
+  .row.gap { flex-direction: column-reverse; }
+  .btn-primary, .btn-outline { min-width: unset; }
+}

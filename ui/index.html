@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FigoBooks Printer Setup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/ui/style.css" />
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+  <!-- Port injected at runtime by server.js — do not set content here -->
+  <meta name="figo-port" content="3838" />
+</head>
+<body>
+  <div class="shell">
+
+    <!-- Step indicators -->
+    <div class="steps" id="stepNav">
+      <div class="step active" data-step="0"></div>
+      <div class="step" data-step="1"></div>
+      <div class="step" data-step="2"></div>
+      <div class="step" data-step="3"></div>
+    </div>
+
+    <!-- ── Screen 0: Welcome ──────────────────────────────────────── -->
+    <div class="screen active" id="screen-0">
+      <div class="brand-header">
+        <img src="/assets/icon-setup-80.png" alt="FigoBooks" class="brand-logo" />
+        <img src="/assets/wordmark-240.png" alt="FigoBooks" class="brand-wordmark" />
+      </div>
+      <h1>Printer Setup</h1>
+      <p>This quick wizard connects your thermal printer to FigoBooks so you can print receipts and invoices instantly.</p>
+      <p class="hint">Takes about 2 minutes.</p>
+      <button class="btn-primary" onclick="goTo(1)">Get Started →</button>
+    </div>
+
+    <!-- ── Screen 1: Scan printers ───────────────────────────────── -->
+    <div class="screen" id="screen-1">
+      <img src="/assets/icon-setup-80.png" alt="" class="screen-logo" />
+      <div class="icon-wrap spin-wrap" id="scanIcon">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" stroke="#2234FD" stroke-width="3" stroke-dasharray="150 50"/>
+          <circle cx="32" cy="32" r="18" stroke="#d9dcff" stroke-width="2"/>
+          <circle cx="32" cy="32" r="6" fill="#2234FD"/>
+        </svg>
+      </div>
+      <h1 id="scanTitle">Scanning for Printers…</h1>
+      <p id="scanSubtitle">Make sure your printer is turned on and nearby.</p>
+
+      <div class="printer-list" id="printerList" style="display:none"></div>
+
+      <div class="scan-status" id="scanStatus">
+        <span class="dot pulse"></span>
+        <span id="scanStatusText">Scanning via Bluetooth and USB…</span>
+      </div>
+
+      <!-- Bluetooth warning — shown when BT is off or permission denied -->
+      <div class="bt-warning" id="btWarning" style="display:none">
+        <div class="bt-warning-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6.5 6.5l11 11M17.5 6.5L12 12l5.5 5.5L12 23V1l5.5 5.5z" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div>
+          <strong id="btWarningTitle">Bluetooth is Off</strong>
+          <p id="btWarningMsg">Please turn on Bluetooth in System Settings and scan again.</p>
+        </div>
+      </div>
+
+      <div class="row gap" id="scanActions" style="display:none">
+        <button class="btn-outline" id="btnScanAgain" onclick="startScan()">Scan Again</button>
+        <button class="btn-primary" id="btnSelectPrinter" disabled onclick="bindPrinter()">Connect →</button>
+      </div>
+    </div>
+
+    <!-- ── Screen 2: Test print ───────────────────────────────────── -->
+    <div class="screen" id="screen-2">
+      <img src="/assets/icon-setup-80.png" alt="" class="screen-logo" />
+      <h1>Test Your Printer</h1>
+      <p>Send a test receipt to confirm everything is connected correctly.</p>
+
+      <div class="test-result" id="testResult" style="display:none"></div>
+
+      <div class="row gap" style="margin-top:auto">
+        <button class="btn-outline" onclick="goTo(1)">← Back</button>
+        <button class="btn-primary" id="btnTestPrint" onclick="sendTestPrint()">Print Test Receipt</button>
+      </div>
+      <p class="hint skip-link" onclick="goTo(3)">Skip test →</p>
+    </div>
+
+    <!-- ── Screen 3: Done ─────────────────────────────────────────── -->
+    <div class="screen" id="screen-3">
+      <div class="done-logo-wrap">
+        <img src="/assets/icon-setup-80.png" alt="FigoBooks" class="done-logo" />
+        <div class="done-check">✓</div>
+      </div>
+      <h1>You're All Set! 🎉</h1>
+      <p>
+        <strong id="donePrinterName">Your printer</strong> is connected and ready to use.
+        FigoBooks will print receipts automatically from now on.
+      </p>
+
+      <div class="done-card">
+        <div class="done-row">
+          <span>Printer</span>
+          <strong id="donePrinterLabel">—</strong>
+        </div>
+        <div class="done-row">
+          <span>Status</span>
+          <strong class="status-badge connected">Connected</strong>
+        </div>
+      </div>
+
+      <p class="hint">The driver runs silently in the background.<br/>You can close this window.</p>
+      <button class="btn-primary" onclick="window.location.href='/close-setup'">Close Setup</button>
+      <button class="btn-ghost" onclick="disconnectAndRescan()">Change Printer</button>
+    </div>
+
+  </div><!-- /shell -->
+
+  <script src="/ui/setup.js"></script>
+</body>
+</html>

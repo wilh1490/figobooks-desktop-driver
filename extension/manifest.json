@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "FigoBooks Printer",
+  "description": "Routes browser print jobs to your FigoBooks thermal printer",
+  "version": "1.0.0",
+  "permissions": ["tabs"],
+  "host_permissions": [
+    "http://localhost:3838/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16":  "icon-16.png",
+    "48":  "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "action": {
+    "default_title": "FigoBooks Printer",
+    "default_icon": {
+      "16":  "icon-16.png",
+      "48":  "icon-48.png",
+      "128": "icon-128.png"
+    }
+  }
+}

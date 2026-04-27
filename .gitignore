@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.log
+.figobooks/
+*.pkg
+*.dmg
+*.exe
+
+# Generated icon files (run assets/gen_icons.py to regenerate)
+assets/icon-*.png
+assets/tray-icon-*.png
+assets/icon-setup-80.png
+assets/wordmark-240.png
+assets/favicon.ico
+
+# Keep source brand assets
+!assets/logo-blue.png
+!assets/logo-white.png
+!assets/wordmark-blue.png
+!assets/wordmark-white.png
+!assets/gen_icons.py

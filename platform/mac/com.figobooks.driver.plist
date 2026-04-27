@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.figobooks.driver.plist
+  macOS LaunchAgent — auto-starts the FigoBooks Printer Driver on login.
+
+  This file is generated/installed by: node platform/mac/install.js
+  It lives at: ~/Library/LaunchAgents/com.figobooks.driver.plist
+
+  To load manually:
+    launchctl load -w ~/Library/LaunchAgents/com.figobooks.driver.plist
+
+  To unload:
+    launchctl unload ~/Library/LaunchAgents/com.figobooks.driver.plist
+-->
+<plist version="1.0">
+<dict>
+
+  <!-- Unique identifier for this agent -->
+  <key>Label</key>
+  <string>com.figobooks.driver</string>
+
+  <!-- Path to the binary or node + script — filled in by install.js at runtime -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>SCRIPT_PATH_PLACEHOLDER</string>
+  </array>
+
+  <!-- Start immediately when the plist is loaded and on every login -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart the process if it crashes -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Log files written to ~/.figobooks/logs/ -->
+  <key>StandardOutPath</key>
+  <string>LOG_DIR_PLACEHOLDER/driver.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>LOG_DIR_PLACEHOLDER/driver-error.log</string>
+
+  <!-- Throttle restarts: wait 10 seconds before restarting on crash -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key>
+    <string>production</string>
+    <!-- Ensures the driver uses the correct home directory -->
+    <key>HOME</key>
+    <string>HOME_PLACEHOLDER</string>
+  </dict>
+
+</dict>
+</plist>

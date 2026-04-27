@@ -1,0 +1,31 @@
+{
+  "name": "figo-mac-driver",
+  "version": "1.0.0",
+  "description": "FigoBooks local printer bridge — connects thermal printers to the FigoBooks web app",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "dev": "node --watch main.js",
+    "postinstall": "python3 assets/gen_icons.py || true",
+    "install-service:mac": "node platform/mac/install.js",
+    "uninstall-service:mac": "node platform/mac/install.js uninstall",
+    "install-service:win": "node platform/win/service.js install",
+    "uninstall-service:win": "node platform/win/service.js uninstall",
+    "build:mac": "node platform/mac/build.js",
+    "build:pkg:mac": "node platform/mac/build-pkg.js",
+    "build:win": "node platform/win/build.js",
+    "build:extension": "node platform/mac/build-extension.js",
+    "build:dist": "npm run build:extension && npm run build:pkg:mac"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "open": "^10.1.0",
+    "usb": "^2.11.0"
+  },
+  "optionalDependencies": {
+    "@abandonware/noble": "^1.9.2-22",
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {}
+}
