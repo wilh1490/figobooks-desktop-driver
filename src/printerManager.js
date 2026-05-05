@@ -37,21 +37,23 @@ let _lastForgottenBLE = null;
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Discover nearby printers via BLE and USB.
+ * Discover nearby printers via BLE, USB, network, and serial.
  * Returns a promise that resolves with an array of discovered devices.
  */
 async function discover(timeoutMs = 8000) {
   const found = [];
 
-  const [bleDevices, usbDevices, networkDevices] = await Promise.allSettled([
+  const [bleDevices, usbDevices, networkDevices, serialDevices] = await Promise.allSettled([
     _discoverBLE(timeoutMs),
     _discoverUSB(),
     _discoverNetwork(timeoutMs),
+    _discoverSerial(),
   ]);
 
   if (bleDevices.status === 'fulfilled') found.push(...bleDevices.value);
   if (usbDevices.status === 'fulfilled') found.push(...usbDevices.value);
   if (networkDevices.status === 'fulfilled') found.push(...networkDevices.value);
+  if (serialDevices.status === 'fulfilled') found.push(...serialDevices.value);
 
   // Currently-connected BLE printer stops advertising, so inject from cache.
   const currentPrinter = _state.printer;
@@ -389,6 +391,65 @@ async function _discoverUSB() {
   return printers;
 }
 
+/**
+ * Discover Bluetooth serial printers (Y50 / 380Pro) so they appear even when
+ * USB/BLE discovery paths are unavailable.
+ */
+async function _discoverSerial() {
+  const printers = [];
+  const searchTerms = ['y50', '380pro', '380'];
+
+  // Try serialport library first (cross-platform)
+  try {
+    const { SerialPort } = require('serialport');
+    const ports = await SerialPort.list();
+
+    for (const port of ports) {
+      const matched = searchTerms.some(term =>
+        (port.path && port.path.toLowerCase().includes(term)) ||
+        (port.friendlyName && port.friendlyName.toLowerCase().includes(term)) ||
+        (port.pnpId && port.pnpId.toLowerCase().includes(term))
+      );
+      if (!matched) continue;
+
+      const name = port.friendlyName || port.path;
+      printers.push({
+        type: 'y50',
+        name,
+        address: port.path,
+        serialPath: port.path,
+      });
+    }
+    return printers;
+  } catch {
+    // serialport not installed, fall back to manual detection below
+  }
+
+  // Fallback: macOS manual scan
+  if (process.platform === 'darwin') {
+    const fs = require('fs');
+    const path = require('path');
+    try {
+      const serialPorts = fs.readdirSync('/dev')
+        .filter(f => /^cu\./i.test(f) && searchTerms.some(term => f.toLowerCase().includes(term)))
+        .map(f => path.join('/dev', f));
+
+      for (const serialPath of serialPorts) {
+        printers.push({
+          type: 'y50',
+          name: serialPath,
+          address: serialPath,
+          serialPath,
+        });
+      }
+    } catch {
+      // ignore scan failures
+    }
+  }
+
+  return printers;
+}
+
 // ─── Network Printer Discovery & Connection ─────────────────────────────────
 
 /**
@@ -604,19 +665,23 @@ async function _connectBLE(descriptor) {
 // ── Y50 dual-path (Classic BT serial + BLE GATT) ─────────────────────────────
 
 /**
- * Find Y50 Bluetooth serial port (cross-platform).
- * - macOS: /dev/cu.Y50_xxxx-SPP
- * - Windows: COM port with "Y50" in device name
+ * Find Y50/380Pro Bluetooth serial port (cross-platform).
+ * - macOS: /dev/cu.Y50_xxxx or /dev/cu.380Pro-xxxx
+ * - Windows: COM port with "Y50"/"380" in device name
  */
 async function _findY50SerialPort() {
+  const searchTerms = ['y50', '380pro', '380'];
+
   // Try serialport library first (cross-platform)
   try {
     const { SerialPort } = require('serialport');
     const ports = await SerialPort.list();
-    const y50Port = ports.find(p => 
-      (p.path && p.path.toLowerCase().includes('y50')) ||
-      (p.friendlyName && p.friendlyName.toLowerCase().includes('y50')) ||
-      (p.pnpId && p.pnpId.toLowerCase().includes('y50'))
+    const y50Port = ports.find(p =>
+      searchTerms.some(term =>
+        (p.path && p.path.toLowerCase().includes(term)) ||
+        (p.friendlyName && p.friendlyName.toLowerCase().includes(term)) ||
+        (p.pnpId && p.pnpId.toLowerCase().includes(term))
+      )
     );
     if (y50Port) return y50Port.path;
   } catch {
@@ -629,7 +694,7 @@ async function _findY50SerialPort() {
     const path = require('path');
     try {
       return fs.readdirSync('/dev')
-        .filter(f => /^cu\./i.test(f) && f.toLowerCase().includes('y50'))
+        .filter(f => /^cu\./i.test(f) && searchTerms.some(term => f.toLowerCase().includes(term)))
         .map(f => path.join('/dev', f))[0] || null;
     } catch {
       return null;
