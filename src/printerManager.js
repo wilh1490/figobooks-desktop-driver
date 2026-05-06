@@ -368,12 +368,53 @@ function _rssiLabel(rssi) {
   return 'Weak';
 }
 
+async function _discoverWindowsUsbPrinters() {
+  if (process.platform !== 'win32') return [];
+  const { execFile } = require('child_process');
+
+  return new Promise((resolve) => {
+    execFile('wmic', ['printer', 'get', 'Name,PortName', '/format:csv'], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+      if (err || !stdout) return resolve([]);
+      const printers = [];
+      const seen = new Set();
+
+      for (const line of stdout.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || /^Node,/i.test(trimmed)) continue;
+        const parts = trimmed.split(',');
+        const portName = parts.pop();
+        const name = parts.slice(1).join(',') || parts[0] || '';
+        const match = name.match(/([0-9a-f]{4}):([0-9a-f]{4})/i);
+        if (!/^USB0*\d+$/i.test(String(portName || '')) && !match) continue;
+
+        const vendorId = match ? parseInt(match[1], 16) : null;
+        const productId = match ? parseInt(match[2], 16) : null;
+        const key = `${name}:${portName}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        printers.push({
+          type: 'usb',
+          name: name || `Windows USB Printer (${portName})`,
+          address: vendorId != null && productId != null ? `${vendorId}:${productId}` : null,
+          usbId: vendorId != null && productId != null ? `${vendorId}:${productId}` : null,
+          vendorId,
+          productId,
+          portName,
+        });
+      }
+
+      resolve(printers);
+    });
+  });
+}
+
 async function _discoverUSB() {
   let usb;
   try {
     usb = require('usb');
   } catch {
-    return [];
+    return _discoverWindowsUsbPrinters();
   }
 
   // Accept devices that expose printer-class interfaces (class 7). On Windows,
@@ -409,7 +450,7 @@ async function _discoverUSB() {
     if (!hasPrinterIface) {
       // Last-resort heuristic: many low-cost thermal printers present as vendor-
       // specific class on Windows. Keep likely printer USB IDs to allow binding.
-      const likelyPrinterVidPrefixes = ['04b8', '0519', '067b', '0fe6', '0483', '1fc9', '28e9', '1a86', '0416'];
+      const likelyPrinterVidPrefixes = ['04b8', '0519', '067b', '0fe6', '0483', '1fc9', '28e9', '1a86', '0416', '5958'];
       const vidLooksLikePrinter = likelyPrinterVidPrefixes.includes(vid);
       if (!vidLooksLikePrinter) continue;
     }
@@ -422,6 +463,18 @@ async function _discoverUSB() {
       productId: d.deviceDescriptor.idProduct,
       _device:   d,
     });
+  }
+
+  if (process.platform === 'win32') {
+    const windowsPrinters = await _discoverWindowsUsbPrinters();
+    for (const p of windowsPrinters) {
+      if (!printers.some(existing =>
+        (p.usbId && existing.usbId === p.usbId) ||
+        (p.portName && existing.portName === p.portName)
+      )) {
+        printers.push(p);
+      }
+    }
   }
 
   return printers;
@@ -922,8 +975,6 @@ async function _findWindowsUsbPrintPort() {
 }
 
 async function _connectUSB(descriptor) {
-  const usb = require('usb');
-
   // vendorId / productId may have been stripped during JSON serialisation
   // (e.g. POST /bind only round-trips strings).  Parse from the usbId address
   // string ("decimal:decimal") as a fallback.
@@ -936,8 +987,18 @@ async function _connectUSB(descriptor) {
     productId = productId ?? parseInt(p, 10);
   }
 
+  let usb;
+  try {
+    usb = require('usb');
+  } catch (usbRequireErr) {
+    if (process.platform !== 'win32') throw usbRequireErr;
+    console.log(`[USB] Native usb module unavailable, using Windows fallbacks: ${usbRequireErr.message || usbRequireErr}`);
+    return _connectWindowsUsbFallback(vendorId, productId, descriptor);
+  }
+
   const device = usb.findByIds(vendorId, productId);
   if (!device) {
+    if (process.platform === 'win32') return _connectWindowsUsbFallback(vendorId, productId, descriptor);
     throw new Error(
       `USB device not found (${vendorId?.toString(16)}:${productId?.toString(16)}). ` +
       'Make sure the printer is plugged in and try scanning again.'
@@ -1025,6 +1086,59 @@ async function _connectUSB(descriptor) {
     }
     throw libusbErr;
   }
+}
+
+async function _connectWindowsUsbFallback(vendorId, productId, descriptor = {}) {
+  if (process.platform !== 'win32') {
+    throw new Error('Windows USB fallback is only available on Windows');
+  }
+
+  try {
+    const winUsbPrintRaw = require('./winUsbPrintRaw');
+    const devicePath = vendorId != null && productId != null
+      ? await winUsbPrintRaw.findDevicePath(vendorId, productId)
+      : null;
+    if (devicePath) {
+      console.log(`[USB] Using Windows USBPRINT raw interface for ${vendorId}:${productId}`);
+      return { type: 'usbprint', devicePath, vendorId, productId };
+    }
+  } catch (usbPrintErr) {
+    console.log(`[USB] USBPRINT raw fallback failed: ${usbPrintErr.message || usbPrintErr}`);
+  }
+
+  try {
+    const winSpool = require('./winSpoolRaw');
+    const winPrinterSetup = require('./winPrinterSetup');
+
+    let queue = null;
+    if (vendorId != null && productId != null) {
+      queue = await winSpool.findQueueForUsbPrinter(vendorId, productId);
+    }
+    if (!queue && descriptor.name) {
+      queue = { Name: descriptor.name, PortName: descriptor.portName || null };
+    }
+    if (!queue && vendorId != null && productId != null) {
+      const install = await winPrinterSetup.autoInstallUsbPrinter(vendorId, productId);
+      if (install.success) queue = { Name: install.printerName, PortName: install.port };
+    }
+
+    if (queue?.Name) {
+      console.log(`[USB] Using Windows spooler queue "${queue.Name}" as fallback`);
+      return {
+        type: 'winspool',
+        printerName: queue.Name,
+        portName: queue.PortName || descriptor.portName || null,
+        vendorId,
+        productId,
+      };
+    }
+  } catch (spoolErr) {
+    console.log(`[USB] Windows spooler fallback failed: ${spoolErr.message || spoolErr}`);
+  }
+
+  throw new Error(
+    'Cannot access USB printer. Please install it in Windows first, then scan/connect again.'
+  );
 }
 
 async function _connectSerial(descriptor) {

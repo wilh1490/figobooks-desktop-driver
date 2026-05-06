@@ -18,9 +18,11 @@ const path         = require('path');
 const ROOT    = path.resolve(__dirname, '..', '..');
 const DIST    = path.join(ROOT, 'dist');
 const BINARY  = path.join(DIST, 'figo-driver-win.exe');
+const BUNDLE  = path.join(DIST, 'main.bundle.cjs');
 const SEA_CFG = path.join(ROOT, 'sea-config.json');
 const SEA_BLOB= path.join(ROOT, 'sea-prep.blob');
 const LOCAL_POSTJECT = path.join(ROOT, 'node_modules', '.bin', 'postject.cmd');
+const LOCAL_ESBUILD = path.join(ROOT, 'node_modules', '.bin', 'esbuild.cmd');
 
 function run(cmd) {
   console.log(`  > ${cmd}`);
@@ -31,8 +33,12 @@ console.log('\n[Build] FigoBooks Driver — Windows binary (Node SEA)\n');
 
 if (!fs.existsSync(DIST)) fs.mkdirSync(DIST);
 
+const esbuildCmd = fs.existsSync(LOCAL_ESBUILD) ? `"${LOCAL_ESBUILD}"` : 'npx esbuild';
+run(`${esbuildCmd} "${path.join(ROOT, 'main.js')}" --bundle --platform=node --format=cjs --target=node20 --outfile="${BUNDLE}" --external:usb --external:serialport --external:@abandonware/noble --external:systray2 --external:canvas --external:electron`);
+console.log('[Build] App bundled');
+
 const seaCfg = {
-  main:   'main.js',
+  main:   BUNDLE,
   output: SEA_BLOB,
   disableExperimentalSEAWarning: true,
   useSnapshot:  false,
@@ -60,8 +66,9 @@ const injectCmd = fs.existsSync(LOCAL_POSTJECT)
 run(injectCmd);
 console.log('[Build] SEA blob injected');
 
-fs.unlinkSync(SEA_BLOB);
-fs.unlinkSync(SEA_CFG);
+fs.rmSync(SEA_BLOB, { force: true });
+fs.rmSync(SEA_CFG, { force: true });
+fs.rmSync(BUNDLE, { force: true });
 
 console.log(`\n[Build] Done! Binary: ${BINARY}`);
 console.log('[Build] Size:', Math.round(fs.statSync(BINARY).size / 1024 / 1024) + ' MB');

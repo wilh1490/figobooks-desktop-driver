@@ -27,5 +27,9 @@
   "optionalDependencies": {
     "@abandonware/noble": "^1.9.2-22",
     "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "postject": "^1.0.0-alpha.6"
   }
 }
