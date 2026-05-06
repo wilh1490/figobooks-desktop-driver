@@ -109,6 +109,8 @@ function receipt(data) {
   const time = String(data.time || data.date || new Date().toLocaleDateString());
   const status = String(data.status || '').trim();
   const staff = String(data.staff || '').trim();
+  const soldTo = String(data.soldTo || data.customer || '').trim();
+  const balance = String(data.balance || '').trim();
   const items = Array.isArray(data.items) ? data.items : [];
   const taxes = Array.isArray(data.taxes) ? data.taxes : [];
   const subtotalLabel = String(data.subtotalLabel || 'Subtotal');
@@ -138,6 +140,7 @@ function receipt(data) {
     text(`Time:  ${time}`),
   );
 
+  if (soldTo) parts.push(text(`Customer: ${soldTo}`));
   if (status) parts.push(text(`Status: ${status}`));
   if (staff) parts.push(text(`Staff:  ${staff}`));
 
@@ -189,6 +192,17 @@ function receipt(data) {
     separator(),
   );
 
+  if (balance) {
+    parts.push(
+      CMDS.FEED_1,
+      CMDS.ALIGN_LEFT,
+      CMDS.BOLD_ON,
+      text(`Balance owed: ${balance}`),
+      CMDS.BOLD_OFF,
+      separator(),
+    );
+  }
+
   if (data.note) {
     parts.push(CMDS.FEED_1, CMDS.ALIGN_CENTER, text(data.note));
   }
@@ -207,6 +221,41 @@ function receipt(data) {
   );
 
   return Buffer.concat(parts);
+}
+
+/**
+ * Single-line + CRLF, ASCII only (avoids Latin-1/Unicode on cheap thermal firmware).
+ */
+function lineAscii(s) {
+  return Buffer.from(String(s).replace(/\r?\n/g, ' ') + '\r\n', 'ascii');
+}
+
+/**
+ * Minimal test for Bluetooth SPP / serial devices: no ₦, no double-size,
+ * no partial-cut (GS V) — many 58mm / label-class units ignore the buffer or
+ * lock up on unsupported opcodes, which looks like "blank paper but feed".
+ */
+function testPrintSerial() {
+  const esc = 0x1b;
+  const gs  = 0x1d;
+  return Buffer.concat([
+    Buffer.from([esc, 0x40]), // init
+    Buffer.from([esc, 0x61, 0x01]), // center
+    lineAscii('FIGO / FigoBooks'),
+    lineAscii('TEST OK'),
+    lineAscii('--------------------'),
+    Buffer.from([esc, 0x61, 0x00]), // left
+    lineAscii('Item A   qty 1   1000'),
+    lineAscii('Item B   qty 2   500'),
+    lineAscii('Total: 2000'),
+    lineAscii(''),
+    Buffer.from([esc, 0x64, 0x0a]), // feed 10 lines (enough to eject on 58mm)
+    Buffer.from([0x0a, 0x0a]),
+    // No GS V cut here: some firmware ignores the whole buffer if cut is unsupported.
+    ...(process.env.FIGO_TEST_CUT === '1'
+      ? [Buffer.from([gs, 0x56, 0x00])]
+      : []),
+  ]);
 }
 
 /**
@@ -333,4 +382,4 @@ function imageRaster({ data, width, height, printWidthPx = DEFAULT_80MM_WIDTH_PX
   return Buffer.concat([CMDS.INIT, header, bitmap, CMDS.FEED_3]);
 }
 
-module.exports = { receipt, testPrint, label, imageRaster, text, separator, CMDS };
+module.exports = { receipt, testPrint, testPrintSerial, label, imageRaster, text, separator, CMDS };

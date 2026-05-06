@@ -1,7 +1,7 @@
 from PIL import Image
 import os
 
-ASSETS = "/Users/macbookpro2018/Documents/GitHub/figo-mac-driver/assets"
+ASSETS = os.path.dirname(os.path.abspath(__file__))
 
 logo   = Image.open(os.path.join(ASSETS, "logo-blue.png"))
 logo_w = Image.open(os.path.join(ASSETS, "logo-white.png"))

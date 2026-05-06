@@ -23,6 +23,7 @@ let _state = {
 
 // Active connection reference
 let _connection = null;
+let _genericSerialPortInstance = null;
 
 // Cache of noble peripheral objects from the last scan, keyed by peripheral.id
 const _bleCache = new Map();
@@ -114,13 +115,16 @@ async function connect(printerDescriptor) {
       _connection = await _connectBLE(printerDescriptor);
     } else if (printerDescriptor.type === 'usb') {
       _connection = await _connectUSB(printerDescriptor);
+    } else if (printerDescriptor.type === 'serial') {
+      _connection = await _connectSerial(printerDescriptor);
     } else if (printerDescriptor.type === 'y50') {
       _connection = await _connectY50(printerDescriptor);
     } else {
       throw new Error(`Unknown printer type: ${printerDescriptor.type}`);
     }
 
-    _setState('connected', printerDescriptor);
+    const transport = _connection?.type || printerDescriptor.type;
+    _setState('connected', { ...printerDescriptor, transport });
     // Clear the forgotten-BLE record once we've successfully connected to
     // any printer — it's no longer needed as a discover() fallback.
     _lastForgottenBLE = null;
@@ -170,6 +174,11 @@ async function disconnect() {
       try { const fs = require('fs'); fs.closeSync(_connection.serial); } catch {}
     }
     if (dyingPrinter?.address) _bleCharCache.delete(dyingPrinter.address);
+  } else if (_connection?.type === 'serial') {
+    if (_genericSerialPortInstance) {
+      try { _genericSerialPortInstance.close(); } catch {}
+      _genericSerialPortInstance = null;
+    }
   } else {
     if (_connection) {
       try { _connection.removeAllListeners?.('disconnect'); } catch {}
@@ -225,6 +234,10 @@ function _setState(status, printer = null, error = null) {
 
 const BLE_EXACT_NAMES  = ['mpt-ii'];
 const Y50_PREFIX       = 'y50';
+const BLE_NAME_KEYWORDS = [
+  'printer', 'thermal', 'pos', 'receipt', 'escpos',
+  'xprinter', 'xp-', 'pt-', 'mpt', 'rpp', 'btp', '58', '80',
+];
 
 const MIN_RSSI = -80;
 
@@ -281,7 +294,10 @@ async function _discoverBLE(timeoutMs) {
 
       if (!inRange) return;
 
-      const isThermal = BLE_EXACT_NAMES.includes(name) || name.startsWith(Y50_PREFIX);
+      const isThermal =
+        BLE_EXACT_NAMES.includes(name) ||
+        name.startsWith(Y50_PREFIX) ||
+        BLE_NAME_KEYWORDS.some(k => name.includes(k));
       if (isThermal && !seen.has(peripheral.id)) {
         seen.add(peripheral.id);
         _bleCache.set(peripheral.id, peripheral);
@@ -360,24 +376,44 @@ async function _discoverUSB() {
     return [];
   }
 
-  // Accept any USB device that exposes a printer-class interface (bInterfaceClass 7).
-  // This covers virtually all USB thermal printers regardless of vendor.
+  // Accept devices that expose printer-class interfaces (class 7). On Windows,
+  // some printers cannot be opened for probing due to driver ownership, so we
+  // also inspect config descriptors without opening and keep likely candidates.
   const devices = usb.getDeviceList();
   const printers = [];
 
   for (const d of devices) {
-    try {
-      d.open();
-      const hasPrinterIface = d.interfaces.some(i => i.descriptor.bInterfaceClass === 7);
-      d.close();
-      if (!hasPrinterIface) continue;
-    } catch {
-      // Device busy or permission denied — skip silently
-      continue;
-    }
-
     const vid = d.deviceDescriptor.idVendor.toString(16).padStart(4, '0');
     const pid = d.deviceDescriptor.idProduct.toString(16).padStart(4, '0');
+    let hasPrinterIface = false;
+
+    try {
+      d.open();
+      hasPrinterIface = d.interfaces.some(i => i.descriptor.bInterfaceClass === 7);
+      d.close();
+    } catch {
+      // Device busy/permission denied; try passive descriptor inspection below.
+    }
+
+    if (!hasPrinterIface) {
+      try {
+        const cfg = d.configDescriptor;
+        if (cfg?.interfaces?.length) {
+          hasPrinterIface = cfg.interfaces.some(altList =>
+            Array.isArray(altList) && altList.some(alt => alt.bInterfaceClass === 7)
+          );
+        }
+      } catch {}
+    }
+
+    if (!hasPrinterIface) {
+      // Last-resort heuristic: many low-cost thermal printers present as vendor-
+      // specific class on Windows. Keep likely printer USB IDs to allow binding.
+      const likelyPrinterVidPrefixes = ['04b8', '0519', '067b', '0fe6', '0483', '1fc9', '28e9', '1a86', '0416'];
+      const vidLooksLikePrinter = likelyPrinterVidPrefixes.includes(vid);
+      if (!vidLooksLikePrinter) continue;
+    }
+
     printers.push({
       type:      'usb',
       name:      `USB Printer (${vid}:${pid})`,
@@ -396,7 +432,8 @@ async function _discoverUSB() {
  * USB/BLE discovery paths are unavailable.
  */
 async function _discoverSerial() {
-  const printers = [];
+  const candidates = [];
+  const seen = new Set();
   const searchTerms = ['y50', '380pro', '380'];
 
   // Try serialport library first (cross-platform)
@@ -405,22 +442,26 @@ async function _discoverSerial() {
     const ports = await SerialPort.list();
 
     for (const port of ports) {
-      const matched = searchTerms.some(term =>
-        (port.path && port.path.toLowerCase().includes(term)) ||
-        (port.friendlyName && port.friendlyName.toLowerCase().includes(term)) ||
-        (port.pnpId && port.pnpId.toLowerCase().includes(term))
-      );
-      if (!matched) continue;
+      const serialPath = port.path || '';
+      const text = `${port.path || ''} ${port.friendlyName || ''} ${port.manufacturer || ''} ${port.pnpId || ''}`.toLowerCase();
+      if (/active management technology|amt|sol/.test(text)) continue;
+      const matchesNamedPrinter = searchTerms.some(term => text.includes(term));
+      const looksPrinterish =
+        /bluetooth|printer|thermal|pos|escpos|receipt|usb|ch340|ftdi|prolific|cp210|serial/.test(text);
+      const isComLike = /^com\d+$/i.test(serialPath);
+      if (!serialPath || (!matchesNamedPrinter && !looksPrinterish && !isComLike)) continue;
+      if (seen.has(serialPath.toLowerCase())) continue;
+      seen.add(serialPath.toLowerCase());
 
-      const name = port.friendlyName || port.path;
-      printers.push({
-        type: 'y50',
-        name,
-        address: port.path,
-        serialPath: port.path,
+      const label = port.friendlyName || port.manufacturer || (matchesNamedPrinter ? 'Y50 Serial Printer' : 'Serial Printer');
+      candidates.push({
+        type: matchesNamedPrinter ? 'y50' : 'serial',
+        name: `${label} (${serialPath})`,
+        address: serialPath,
+        serialPath,
       });
     }
-    return printers;
+    return candidates;
   } catch {
     // serialport not installed, fall back to manual detection below
   }
@@ -435,7 +476,7 @@ async function _discoverSerial() {
         .map(f => path.join('/dev', f));
 
       for (const serialPath of serialPorts) {
-        printers.push({
+        candidates.push({
           type: 'y50',
           name: serialPath,
           address: serialPath,
@@ -447,7 +488,7 @@ async function _discoverSerial() {
     }
   }
 
-  return printers;
+  return candidates;
 }
 
 // ─── Network Printer Discovery & Connection ─────────────────────────────────
@@ -791,6 +832,95 @@ async function _writeY50(buffer) {
   }
 }
 
+/**
+ * On Windows, USB printers are claimed by usbprint.sys so libusb cannot open
+ * them directly (LIBUSB_ERROR_NOT_SUPPORTED).  The usbmon.dll port monitor
+ * exposes each USB printer as a raw device path (\\.\USB001, \\.\USB002, …)
+ * that any process can open with O_WRONLY and write ESC/POS bytes to directly.
+ * No driver replacement (Zadig) needed — this is how all Windows POS software works.
+ *
+ * Strategy: prefer the port name Windows registered for any thermal/receipt
+ * printer via wmic; fall back to probing USB00x sequentially.
+ */
+async function _findWindowsUsbPrintPort() {
+  const fs             = require('fs');
+  const { execFile }   = require('child_process');
+
+  // ── 1. Ask Windows which port each printer is on ──────────────────────────
+  // wmic printer get Name,PortName lists all installed printers with their ports.
+  const wmicResult = await new Promise((resolve) => {
+    execFile('wmic', ['printer', 'get', 'Name,PortName', '/format:csv'],
+      { timeout: 4000, windowsHide: true },
+      (err, stdout) => resolve(err ? '' : stdout));
+  });
+
+  console.log('[USB] wmic returned:', wmicResult.substring(0, 300));
+
+  // Parse CSV output and collect USB0xx / USBPRN ports for thermal-ish printers.
+  const thermalKeywords = /xprinter|thermal|pos|receipt|escpos|xp-|btp|rpp|380|58mm|80mm|rongta|hprt|sewoo/i;
+  const usbPortPattern  = /^USB0*\d+$/i;
+  const candidates      = [];
+
+  for (const line of wmicResult.split(/\r?\n/)) {
+    const cols = line.split(',');
+    if (cols.length < 3) continue;
+    // CSV columns: Node, Name, PortName  (or Name, PortName depending on version)
+    const name = cols.slice(0, -1).join(' ');
+    const port = cols[cols.length - 1].trim();
+    if (!usbPortPattern.test(port)) continue;
+    // Put thermal-looking printers first, others at the end as fallback.
+    if (thermalKeywords.test(name)) {
+      candidates.unshift(port);
+    } else {
+      candidates.push(port);
+    }
+  }
+
+  console.log('[USB] Candidate USB ports from wmic:', candidates);
+
+  // ── 2. Try each candidate port path ───────────────────────────────────────
+  for (const portName of candidates) {
+    const portPath = `\\\\.\\${portName}`;
+    try {
+      const fd = fs.openSync(portPath, fs.constants.O_WRONLY | fs.constants.O_NOCTTY);
+      fs.closeSync(fd);
+      return portPath;
+    } catch { /* port busy or gone */ }
+  }
+
+  // ── 3. Blind probe USB001–USB009 as last resort ───────────────────────────
+  for (let i = 1; i <= 9; i++) {
+    const portPath = `\\\\.\\USB00${i}`;
+    try {
+      const fd = fs.openSync(portPath, fs.constants.O_WRONLY | fs.constants.O_NOCTTY);
+      fs.closeSync(fd);
+      console.log(`[USB] Successfully opened ${portPath} (blind probe)`);
+      return portPath;
+    } catch (err) {
+      // Port doesn't exist or in use - try next
+    }
+  }
+
+  // ── 4. Try alternative COM port naming for USB-serial printers ────────────
+  // Some thermal printers enumerate as USB-to-serial (CDC ACM) and create COMx ports.
+  // Skip COM3 (often Intel AMT) and other known non-printer serial devices.
+  const skipPorts = ['COM3']; // Intel AMT
+  for (let i = 1; i <= 20; i++) {
+    const portName = `COM${i}`;
+    if (skipPorts.includes(portName)) continue;
+    const portPath = `\\\\.\\${portName}`;
+    try {
+      const fd = fs.openSync(portPath, fs.constants.O_WRONLY | fs.constants.O_NOCTTY);
+      fs.closeSync(fd);
+      console.log(`[USB] Successfully opened ${portPath} (USB-serial fallback)`);
+      return portPath;
+    } catch { }
+  }
+
+  console.log('[USB] No accessible USB print port found. Printer may not be installed in Windows.');
+  return null;
+}
+
 async function _connectUSB(descriptor) {
   const usb = require('usb');
 
@@ -813,20 +943,129 @@ async function _connectUSB(descriptor) {
       'Make sure the printer is plugged in and try scanning again.'
     );
   }
-  device.open();
 
-  // Immediately detect unplug and mark ourselves disconnected so auto-reconnect
-  // kicks in without waiting for the next failed write.
-  // The detach event lives on usb.usb (the underlying EventEmitter), not usb itself.
-  const usbEmitter = usb.usb ?? usb;
-  usbEmitter.on('detach', (detached) => {
-    if (_connection === detached) {
-      _connection = null;
-      _setState('disconnected');
+  // Try the standard libusb path first.
+  try {
+    device.open();
+
+    // Immediately detect unplug and mark disconnected so auto-reconnect fires.
+    const usbEmitter = usb.usb ?? usb;
+    usbEmitter.on('detach', (detached) => {
+      if (_connection === detached) {
+        _connection = null;
+        _setState('disconnected');
+      }
+    });
+
+    return device;
+  } catch (libusbErr) {
+    console.log(`[USB] libusb device.open() failed: ${libusbErr.message || libusbErr}`);
+
+    // On Windows, usbprint.sys claims printer-class interfaces and libusb
+    // returns LIBUSB_ERROR_NOT_SUPPORTED/ACCESS. Try raw USB port access first
+    // (same as Mac - direct byte writes), then fall back to Windows spooler.
+    if (process.platform !== 'win32') throw libusbErr;
+
+    // PRIORITY 1: Try raw USB port (works like Mac - direct writes)
+    const winPort = await _findWindowsUsbPrintPort();
+    if (winPort) {
+      console.log(`[USB] Using raw Windows USB port ${winPort} (direct writes like Mac)`);
+      return { type: 'winusb', portPath: winPort };
     }
+
+    // PRIORITY 2: Bypass spooler via the USBPRINT device interface.
+    try {
+      const winUsbPrintRaw = require('./winUsbPrintRaw');
+      const devicePath = await winUsbPrintRaw.findDevicePath(vendorId, productId);
+      if (devicePath) {
+        console.log(`[USB] Using Windows USBPRINT raw interface for ${vendorId}:${productId}`);
+        return { type: 'usbprint', devicePath, vendorId, productId };
+      }
+    } catch (usbPrintErr) {
+      console.log(`[USB] USBPRINT raw fallback failed: ${usbPrintErr.message || usbPrintErr}`);
+    }
+
+    // PRIORITY 3: Fall back to Windows Spooler if direct paths are not accessible
+    try {
+      const winSpool = require('./winSpoolRaw');
+      const winPrinterSetup = require('./winPrinterSetup');
+
+      let queue = await winSpool.findQueueForUsbPrinter(vendorId, productId);
+      if (!queue) {
+        const install = await winPrinterSetup.autoInstallUsbPrinter(vendorId, productId);
+        if (install.success) {
+          queue = { Name: install.printerName, PortName: install.port };
+        }
+      }
+
+      if (queue?.Name) {
+        console.log(`[USB] Using Windows spooler queue "${queue.Name}" as fallback`);
+        return {
+          type: 'winspool',
+          printerName: queue.Name,
+          portName: queue.PortName || null,
+          vendorId,
+          productId,
+        };
+      }
+    } catch (spoolErr) {
+      console.log(`[USB] Windows spooler fallback failed: ${spoolErr.message || spoolErr}`);
+    }
+
+    // No method worked
+    const errStr = String(libusbErr.message || libusbErr).toLowerCase();
+    if (errStr.includes('not supported') || errStr.includes('access')) {
+      throw new Error(
+        'Cannot access USB printer. Please install it in Windows first:\n' +
+        '1. Open Settings → Devices → Printers & scanners\n' +
+        '2. Click "Add a printer or scanner"\n' +
+        '3. Let Windows detect and install the printer\n' +
+        '4. Then try connecting again in FigoBooks'
+      );
+    }
+    throw libusbErr;
+  }
+}
+
+async function _connectSerial(descriptor) {
+  const { SerialPort } = require('serialport');
+  const serialPath = descriptor.address;
+  if (!serialPath) throw new Error('Serial printer path is missing');
+
+  // Y50 / Bluetooth SPP thermal links usually use 115200; some stacks use 9600.
+  const name = String(descriptor.name || '');
+  const isY50Serial = /y50/i.test(name) || /y50/i.test(serialPath);
+  const isBTSerial  = /bluetooth/i.test(name);
+  const envBaud = parseInt(process.env.FIGO_SERIAL_BAUD || '', 10);
+  const baudRate = Number.isFinite(envBaud) && envBaud > 0
+    ? envBaud
+    : (isY50Serial || isBTSerial ? 115200 : 9600);
+
+  const port = new SerialPort({
+    path: serialPath,
+    baudRate,
+    autoOpen: false,
   });
 
-  return device;
+  await new Promise((resolve, reject) => {
+    port.open((err) => (err ? reject(err) : resolve()));
+  });
+
+  _genericSerialPortInstance = port;
+  port.on('error', (err) => {
+    console.error('[Serial] port error:', err?.message || err);
+    if (_genericSerialPortInstance === port) {
+      _genericSerialPortInstance = null;
+      _connection = null;
+      _setState('error', _state.printer, err?.message || 'Serial port error');
+    }
+  });
+  port.on('close', () => {
+    _genericSerialPortInstance = null;
+    _setState('disconnected');
+  });
+
+  return { type: 'serial', serialPath };
 }
 
 async function _writeBytes(buffer) {
@@ -836,11 +1075,41 @@ async function _writeBytes(buffer) {
     await _writeNetwork(buffer);
   } else if (_state.printer.type === 'y50') {
     await _writeY50(buffer);
+  } else if (_state.printer.type === 'serial') {
+    await _writeSerial(buffer);
   } else if (_state.printer.type === 'ble') {
     await _writeBLE(buffer);
   } else {
+    // Covers both libusb devices and winusb (raw Windows port) fallback.
     await _writeUSB(buffer);
   }
+}
+
+async function _writeSerial(buffer) {
+  if (!_genericSerialPortInstance) {
+    throw new Error('Serial printer not connected');
+  }
+  const port = _genericSerialPortInstance;
+  const CHUNK = 256;
+  // Large ESC/POS jobs over Bluetooth SPP often need chunked writes + pacing
+  if (buffer.length <= CHUNK) {
+    return new Promise((resolve, reject) => {
+      port.write(buffer, (err) => {
+        if (err) return reject(err);
+        port.drain((drainErr) => (drainErr ? reject(drainErr) : resolve()));
+      });
+    });
+  }
+  for (let off = 0; off < buffer.length; off += CHUNK) {
+    const slice = buffer.subarray(off, Math.min(off + CHUNK, buffer.length));
+    await new Promise((resolve, reject) => {
+      port.write(slice, (err) => (err ? reject(err) : resolve()));
+    });
+    await new Promise((r) => setTimeout(r, 8));
+  }
+  return new Promise((resolve, reject) => {
+    port.drain((drainErr) => (drainErr ? reject(drainErr) : resolve()));
+  });
 }
 
 function _nobleUuid(uuid) {
@@ -988,8 +1257,46 @@ async function _writeBLE(buffer) {
 }
 
 async function _writeUSB(buffer) {
+  const conn = _connection;
+
+  if (conn?.type === 'winspool') {
+    const winSpool = require('./winSpoolRaw');
+    await winSpool.writeRaw(conn.printerName, buffer);
+    return;
+  }
+
+  if (conn?.type === 'usbprint') {
+    const winUsbPrintRaw = require('./winUsbPrintRaw');
+    await winUsbPrintRaw.writeRaw(conn.devicePath, buffer);
+    return;
+  }
+
+  // Windows raw port path (usbprint.sys fallback) — just write bytes directly.
+  if (conn?.type === 'winusb') {
+    const fs = require('fs');
+    return new Promise((resolve, reject) => {
+      fs.open(conn.portPath, fs.constants.O_WRONLY | fs.constants.O_NOCTTY, (openErr, fd) => {
+        if (openErr) {
+          _connection = null;
+          _setState('disconnected');
+          return reject(new Error(`Cannot open Windows USB port ${conn.portPath}: ${openErr.message}`));
+        }
+        fs.write(fd, buffer, (writeErr) => {
+          fs.close(fd, () => {});
+          if (writeErr) {
+            _connection = null;
+            _setState('disconnected');
+            return reject(writeErr);
+          }
+          resolve();
+        });
+      });
+    });
+  }
+
+  // Standard libusb path.
   return new Promise((resolve, reject) => {
-    const device = _connection;
+    const device = conn;
     const iface  = device.interface(0);
     try { iface.claim(); } catch {}
 
@@ -998,7 +1305,6 @@ async function _writeUSB(buffer) {
 
     endpoint.transfer(buffer, (err) => {
       if (err) {
-        // USB write failed — mark disconnected so auto-reconnect fires
         _connection = null;
         _setState('disconnected');
         return reject(err);

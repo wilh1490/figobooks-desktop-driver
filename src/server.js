@@ -24,6 +24,7 @@ const os      = require('os');
 const config  = require('./config');
 const printer = require('./printerManager');
 const queue   = require('./queue');
+const winPrinterSetup = process.platform === 'win32' ? require('./winPrinterSetup') : null;
 const { version, name } = require('../package.json');
 
 function createApp(port) {
@@ -170,6 +171,48 @@ function createApp(port) {
       await printer.connect(descriptor);
       config.set('printer', descriptor);
       res.json({ ok: true, printer: descriptor });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /install-windows-printer  { vendorId, productId }
+  // Auto-installs a USB printer in Windows (requires admin rights)
+  app.post('/install-windows-printer', async (req, res) => {
+    if (process.platform !== 'win32') {
+      return res.status(400).json({ error: 'This endpoint only works on Windows' });
+    }
+    
+    const { vendorId, productId } = req.body;
+    if (!vendorId || !productId) {
+      return res.status(400).json({ error: 'vendorId and productId are required' });
+    }
+    
+    // Check admin rights first
+    const adminCheck = winPrinterSetup.checkAdminRights();
+    if (!adminCheck.hasAdmin) {
+      return res.status(403).json({ 
+        error: adminCheck.message,
+        needsAdmin: true,
+      });
+    }
+    
+    try {
+      const result = await winPrinterSetup.autoInstallUsbPrinter(
+        Number(vendorId),
+        Number(productId)
+      );
+      
+      if (result.success) {
+        res.json({ 
+          ok: true, 
+          printerName: result.printerName, 
+          port: result.port,
+          message: `Printer installed successfully on ${result.port}. Please scan again to connect.`,
+        });
+      } else {
+        res.status(500).json({ error: result.error });
+      }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

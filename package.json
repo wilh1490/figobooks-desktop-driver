@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node main.js",
     "dev": "node --watch main.js",
-    "postinstall": "python3 assets/gen_icons.py || true",
+    "postinstall": "node -e \"const { spawnSync } = require('node:child_process'); const run = (cmd) => spawnSync(cmd, ['assets/gen_icons.py'], { stdio: 'inherit', shell: process.platform === 'win32' }); const cmds = process.platform === 'win32' ? ['python', 'python3', 'py'] : ['python3', 'python']; for (const cmd of cmds) { const r = run(cmd); if (!r.error && r.status === 0) break; } process.exit(0);\"",
     "install-service:mac": "node platform/mac/install.js",
     "uninstall-service:mac": "node platform/mac/install.js uninstall",
     "install-service:win": "node platform/win/service.js install",
@@ -21,11 +21,11 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "open": "^10.1.0",
+    "pureimage": "^0.4.18",
     "usb": "^2.11.0"
   },
   "optionalDependencies": {
     "@abandonware/noble": "^1.9.2-22",
     "serialport": "^12.0.0"
-  },
-  "devDependencies": {}
+  }
 }

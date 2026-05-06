@@ -42,6 +42,42 @@ function getJob(jobId) {
 
 const JOB_TIMEOUT_MS = 30_000; // max 30 s per job before we give up
 
+/**
+ * CPCL/DCRASTER (y50Raster) is for Y50 BLE GATT and some direct-USB paths.
+ * Bluetooth SPP ("Standard Serial over Bluetooth", COMx) speaks ESC/POS — sending
+ * CPCL there feeds blank paper.
+ */
+function _printerUsesY50Raster() {
+  const p = printer.getStatus().printer;
+  if (!p) return false;
+  if (p.type === 'serial') return false;
+  if (p.type === 'y50') return true;
+  if (/y50/i.test(String(p.name || ''))) return true;
+  if (p.type === 'usb' && p.vendorId != null) {
+    const vid = Number(p.vendorId);
+    // Y50 USB cable path appears as VID 0x5958 (decimal 22872) on Windows.
+    if (vid === 0x5958 || vid === 5958) return true;
+  }
+  return false;
+}
+
+function _printerUsesY50UsbEscposRaster() {
+  const p = printer.getStatus().printer;
+  if (!p || process.platform !== 'win32') return false;
+  if (p.type !== 'usb' || p.transport !== 'usbprint') return false;
+  const vid = Number(p.vendorId);
+  return vid === 0x5958 || vid === 5958;
+}
+
+function _encoderLabel(job) {
+  if (job.type === 'image') {
+    if (_printerUsesY50UsbEscposRaster()) return 'Y50-USB-ESCPOS-Raster(image)';
+    return _printerUsesY50Raster() ? 'Y50-CPCL(image)' : 'ESCPOS-GSv0(image)';
+  }
+  if (_printerUsesY50UsbEscposRaster()) return 'Y50-USB-ESCPOS-Raster';
+  return _printerUsesY50Raster() ? 'Y50-CPCL' : 'ESCPOS';
+}
+
 async function _processNext() {
   if (_running) return;
   const next = _jobs.find(j => j.status === 'pending');
@@ -52,6 +88,11 @@ async function _processNext() {
 
   try {
     const buffer = _buildBuffer(next);
+    const s = printer.getStatus();
+    console.log(
+      `[FigoPrint] job=${next.type} bytes=${buffer.length} encoder=${_encoderLabel(next)} ` +
+        `name=${s.printer?.name || 'none'} type=${s.printer?.type || 'none'}`
+    );
     // Race the print against a timeout so a hung BLE write never locks the queue
     await Promise.race([
       printer.send(buffer),
@@ -80,8 +121,16 @@ function _buildBuffer(job) {
     const { dataBase64, width, height } = job.data;
     const raw  = Buffer.from(dataBase64, 'base64');
     const rgba = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-    const status = printer.getStatus();
-    if (status.printer?.type === 'y50') {
+    if (_printerUsesY50UsbEscposRaster()) {
+      return escpos.imageRaster({
+        data: rgba,
+        width,
+        height,
+        printWidthPx: y50Raster.PRINT_WIDTH_PX,
+        threshold: DEFAULT_IMAGE_THRESHOLD,
+      });
+    }
+    if (_printerUsesY50Raster()) {
       return y50Raster.fromImageData({ data: rgba, width, height });
     }
     const requestedWidth = Number(job.data?.printWidthPx);
@@ -95,11 +144,17 @@ function _buildBuffer(job) {
     return escpos.imageRaster({ data: rgba, width, height, printWidthPx, threshold });
   }
 
-  // Check if connected printer is a Y50 (requires bitmap/DCRASTER format)
-  const status = printer.getStatus();
-  const isY50 = status.printer?.type === 'y50';
+  // Y50 family (and mis-bound usb/serial to same device) use CPCL raster, not ESC/POS
+  if (_printerUsesY50UsbEscposRaster()) {
+    switch (job.type) {
+      case 'receipt': return y50Raster.receiptEscposRaster(job.data);
+      case 'label':   return y50Raster.receiptEscposRaster(job.data);
+      case 'test':    return y50Raster.testPrintEscposRaster();
+      default:        throw new Error(`Unknown job type: ${job.type}`);
+    }
+  }
 
-  if (isY50) {
+  if (_printerUsesY50Raster()) {
     switch (job.type) {
       case 'receipt': return y50Raster.receipt(job.data);
       case 'label':   return y50Raster.receipt(job.data); // same format for now
@@ -108,10 +163,12 @@ function _buildBuffer(job) {
     }
   } else {
     // Standard ESC/POS for other printers (USB thermal, MPT BLE, etc.)
+    const p = printer.getStatus().printer;
     switch (job.type) {
       case 'receipt': return escpos.receipt(job.data);
       case 'label':   return escpos.label(job.data);
-      case 'test':    return escpos.testPrint();
+      case 'test':
+        return p?.type === 'serial' ? escpos.testPrintSerial() : escpos.testPrint();
       default:        throw new Error(`Unknown job type: ${job.type}`);
     }
   }

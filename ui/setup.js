@@ -219,7 +219,18 @@ async function bindPrinter() {
     btn.disabled    = false;
     btn.textContent = 'Connect →';
     if (btnScan) btnScan.disabled = false;
-    showToast(`Connection failed: ${err.message}`, 'error');
+    
+    // If it's a USB printer that failed due to Windows driver issues, offer auto-install
+    const isUsbPrinter = selectedPrinter.type === 'usb';
+    const needsWindowsDriver = err.message.includes('install') || 
+                               err.message.includes('Windows') ||
+                               err.message.includes('USB port');
+    
+    if (isUsbPrinter && needsWindowsDriver) {
+      showWindowsInstallPrompt(selectedPrinter, err.message);
+    } else {
+      showToast(`Connection failed: ${err.message}`, 'error');
+    }
   }
 }
 
@@ -385,4 +396,80 @@ function _hideReconnectingBanner() {
   // Restore done screen badge
   const badge = document.querySelector('#screen-3 .status-badge');
   if (badge) { badge.className = 'status-badge connected'; badge.textContent = 'Connected'; }
+}
+
+// ── Windows printer auto-install ──────────────────────────────────────────────
+function showWindowsInstallPrompt(printer, errorMsg) {
+  // Create modal overlay
+  const modal = document.createElement('div');
+  modal.id = 'install-modal';
+  modal.style.cssText = `
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.7); z-index:9999;
+    display:flex; align-items:center; justify-content:center;
+    animation: fadeIn 0.2s ease;
+  `;
+  
+  const dialog = document.createElement('div');
+  dialog.style.cssText = `
+    background:#fff; border-radius:16px; padding:32px;
+    max-width:480px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.3);
+  `;
+  
+  dialog.innerHTML = `
+    <h2 style="margin:0 0 12px; font-size:1.4rem; color:#0f1117;">Printer Not Installed</h2>
+    <p style="margin:0 0 24px; color:#64748b; line-height:1.6;">
+      ${escapeHtml(errorMsg)}
+    </p>
+    <p style="margin:0 0 24px; color:#64748b; line-height:1.6;">
+      <strong style="color:#0f1117;">Would you like to install it automatically?</strong><br/>
+      This will create a Windows printer queue for this device.
+    </p>
+    <div style="display:flex; gap:12px; justify-content:flex-end;">
+      <button id="btn-cancel-install" class="btn-outline">Cancel</button>
+      <button id="btn-auto-install" class="btn-primary">Install Automatically</button>
+    </div>
+  `;
+  
+  modal.appendChild(dialog);
+  document.body.appendChild(modal);
+  
+  document.getElementById('btn-cancel-install').onclick = () => modal.remove();
+  document.getElementById('btn-auto-install').onclick = async () => {
+    const btn = document.getElementById('btn-auto-install');
+    btn.disabled = true;
+    btn.textContent = 'Installing...';
+    
+    try {
+      const res = await fetch(`${API}/install-windows-printer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendorId: printer.vendorId,
+          productId: printer.productId,
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        if (data.needsAdmin) {
+          throw new Error('Please restart FigoBooks as Administrator to install printers automatically.');
+        }
+        throw new Error(data.error || 'Installation failed');
+      }
+      
+      modal.remove();
+      showToast('Printer installed! Scanning again...', 'info');
+      
+      // Wait a moment for Windows to settle, then rescan
+      await sleep(1500);
+      startScan();
+      
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Install Automatically';
+      showToast(err.message, 'error');
+    }
+  };
 }
