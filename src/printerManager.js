@@ -393,9 +393,10 @@ async function _discoverWindowsUsbPrinters() {
         if (seen.has(key)) continue;
         seen.add(key);
 
+        const knownName = (vendorId && productId) ? _getKnownPrinterName(vendorId, productId) : null;
         printers.push({
           type: 'usb',
-          name: name || `Windows USB Printer (${portName})`,
+          name: knownName || name || `Windows USB Printer (${portName})`,
           address: vendorId != null && productId != null ? `${vendorId}:${productId}` : null,
           usbId: vendorId != null && productId != null ? `${vendorId}:${productId}` : null,
           vendorId,
@@ -407,6 +408,22 @@ async function _discoverWindowsUsbPrinters() {
       resolve(printers);
     });
   });
+}
+
+function _getKnownPrinterName(vendorId, productId) {
+  // Map known printer models by VID:PID
+  const knownModels = {
+    '5958:0150': 'Y50',
+    '09c5:0386': '380Pro',
+    '09c5:0387': '380Pro',
+    '09c5:0388': '380Pro',
+  };
+  
+  const vid = vendorId.toString(16).padStart(4, '0').toLowerCase();
+  const pid = productId.toString(16).padStart(4, '0').toLowerCase();
+  const key = `${vid}:${pid}`;
+  
+  return knownModels[key] || null;
 }
 
 async function _discoverUSB() {
@@ -455,9 +472,10 @@ async function _discoverUSB() {
       if (!vidLooksLikePrinter) continue;
     }
 
+    const knownName = _getKnownPrinterName(d.deviceDescriptor.idVendor, d.deviceDescriptor.idProduct);
     printers.push({
       type:      'usb',
-      name:      `USB Printer (${vid}:${pid})`,
+      name:      knownName || `USB Printer (${vid}:${pid})`,
       usbId:     `${d.deviceDescriptor.idVendor}:${d.deviceDescriptor.idProduct}`,
       vendorId:  d.deviceDescriptor.idVendor,
       productId: d.deviceDescriptor.idProduct,
