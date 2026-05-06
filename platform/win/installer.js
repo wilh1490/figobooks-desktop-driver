@@ -152,6 +152,23 @@ function installFromCurrentExe() {
 
     if (normalizeWinPath(process.execPath) !== normalizeWinPath(installedExe)) {
       fs.copyFileSync(process.execPath, installedExe);
+      
+      // Copy ui/ and assets/ folders if they exist alongside the source exe
+      const sourceDir = path.dirname(process.execPath);
+      const sourceUi = path.join(sourceDir, 'ui');
+      const sourceAssets = path.join(sourceDir, 'assets');
+      const destUi = path.join(installDir, 'ui');
+      const destAssets = path.join(installDir, 'assets');
+      
+      if (fs.existsSync(sourceUi)) {
+        if (fs.existsSync(destUi)) fs.rmSync(destUi, { recursive: true, force: true });
+        fs.cpSync(sourceUi, destUi, { recursive: true });
+      }
+      
+      if (fs.existsSync(sourceAssets)) {
+        if (fs.existsSync(destAssets)) fs.rmSync(destAssets, { recursive: true, force: true });
+        fs.cpSync(sourceAssets, destAssets, { recursive: true });
+      }
     }
 
     createShortcut(startMenuShortcut, installedExe);
