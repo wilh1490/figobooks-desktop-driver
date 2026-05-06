@@ -70,6 +70,20 @@ fs.rmSync(SEA_BLOB, { force: true });
 fs.rmSync(SEA_CFG, { force: true });
 fs.rmSync(BUNDLE, { force: true });
 
+// Copy UI and assets folders to dist
+console.log('[Build] Copying UI and assets...');
+const UI_SRC = path.join(ROOT, 'ui');
+const UI_DEST = path.join(DIST, 'ui');
+const ASSETS_SRC = path.join(ROOT, 'assets');
+const ASSETS_DEST = path.join(DIST, 'assets');
+
+if (fs.existsSync(UI_DEST)) fs.rmSync(UI_DEST, { recursive: true, force: true });
+if (fs.existsSync(ASSETS_DEST)) fs.rmSync(ASSETS_DEST, { recursive: true, force: true });
+
+fs.cpSync(UI_SRC, UI_DEST, { recursive: true });
+fs.cpSync(ASSETS_SRC, ASSETS_DEST, { recursive: true });
+console.log('[Build] UI and assets copied');
+
 console.log(`\n[Build] Done! Binary: ${BINARY}`);
 console.log('[Build] Size:', Math.round(fs.statSync(BINARY).size / 1024 / 1024) + ' MB');
 console.log('\nInstall as Windows Service:');

@@ -27,19 +27,22 @@ const queue   = require('./queue');
 const winPrinterSetup = process.platform === 'win32' ? require('./winPrinterSetup') : null;
 const { version, name } = require('../package.json');
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+  if (/^chrome-extension:\/\//.test(origin)) return true;
+  if (/^https:\/\/([a-z0-9-]+\.)*figobooks\.[a-z.]+$/i.test(origin)) return true;
+  return false;
+}
+
 function createApp(port) {
   const app = express();
 
-  // Allow localhost origins and the FigoBooks browser extension
+  // Allow localhost, the FigoBooks browser extension, and FigoBooks web apps.
   app.use(cors({
     origin: (origin, cb) => {
-      if (
-        !origin ||
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-        /^chrome-extension:\/\//.test(origin)
-      ) {
-        return cb(null, true);
-      }
+      if (isAllowedOrigin(origin)) return cb(null, true);
+      console.log(`[CORS] blocked origin: ${origin || '(none)'}`);
       cb(new Error('CORS: origin not allowed'));
     },
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
@@ -48,8 +51,14 @@ function createApp(port) {
   app.use(express.json({ limit: '15mb' }));
 
   // ── Serve setup wizard UI ──────────────────────────────────────────────────
-  app.use('/ui', express.static(path.join(__dirname, '..', 'ui')));
-  app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
+  // When bundled, __dirname points to snapshot, so look relative to process.execPath
+  const isBundled = process.execPath.endsWith('.exe') && !process.execPath.includes('node.exe');
+  const appRoot = isBundled ? path.dirname(process.execPath) : path.join(__dirname, '..');
+  const uiPath = path.join(appRoot, 'ui');
+  const assetsPath = path.join(appRoot, 'assets');
+  
+  app.use('/ui', express.static(uiPath));
+  app.use('/assets', express.static(assetsPath));
 
   // ── Serve browser extension for Chrome/Edge/Brave force-install ───────────
   const EXT_DIR = path.join(os.homedir(), '.figobooks', 'extension');
@@ -79,7 +88,7 @@ function createApp(port) {
   app.get('/setup', (_req, res) => {
     // Inject the active port into the HTML via a <meta> tag so setup.js
     // never needs to hardcode 3838.
-    const html = fs.readFileSync(path.join(__dirname, '..', 'ui', 'index.html'), 'utf8');
+    const html = fs.readFileSync(path.join(uiPath, 'index.html'), 'utf8');
     const injected = html.replace(
       '<meta name="figo-port"',
       `<meta name="figo-port" content="${port}"`
