@@ -26,7 +26,8 @@ function init() {}
  */
 function enqueue(type, data) {
   const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const job   = { jobId, type, data, status: 'pending', createdAt: new Date().toISOString() };
+  const copies = _normalizeCopies(data?.copies);
+  const job   = { jobId, type, data, copies, status: 'pending', createdAt: new Date().toISOString() };
   _jobs.push(job);
   _processNext();
   return jobId;
@@ -41,6 +42,16 @@ function getJob(jobId) {
 }
 
 const JOB_TIMEOUT_MS = 30_000; // max 30 s per job before we give up
+const COPY_DELAY_MS = 2_000;
+
+function _normalizeCopies(value) {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n >= 1 && n <= 10 ? n : 1;
+}
+
+function _delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * CPCL/DCRASTER (y50Raster) is for Y50 BLE GATT and some direct-USB paths.
@@ -69,12 +80,20 @@ function _printerUsesY50UsbEscposRaster() {
   return vid === 0x5958 || vid === 5958;
 }
 
+function _printerUsesWindowsUsbRaster() {
+  const p = printer.getStatus().printer;
+  if (!p || process.platform !== 'win32') return false;
+  return p.type === 'usb' && !_printerUsesY50Raster();
+}
+
 function _encoderLabel(job) {
   if (job.type === 'image') {
     if (_printerUsesY50UsbEscposRaster()) return 'Y50-USB-ESCPOS-Raster(image)';
+    if (_printerUsesWindowsUsbRaster()) return 'Windows-USB-ESCPOS-Raster(image)';
     return _printerUsesY50Raster() ? 'Y50-CPCL(image)' : 'ESCPOS-GSv0(image)';
   }
   if (_printerUsesY50UsbEscposRaster()) return 'Y50-USB-ESCPOS-Raster';
+  if (_printerUsesWindowsUsbRaster()) return 'Windows-USB-ESCPOS-Raster';
   return _printerUsesY50Raster() ? 'Y50-CPCL' : 'ESCPOS';
 }
 
@@ -90,16 +109,19 @@ async function _processNext() {
     const buffer = _buildBuffer(next);
     const s = printer.getStatus();
     console.log(
-      `[FigoPrint] job=${next.type} bytes=${buffer.length} encoder=${_encoderLabel(next)} ` +
+      `[FigoPrint] job=${next.type} copies=${next.copies} bytes=${buffer.length} encoder=${_encoderLabel(next)} ` +
         `name=${s.printer?.name || 'none'} type=${s.printer?.type || 'none'}`
     );
-    // Race the print against a timeout so a hung BLE write never locks the queue
-    await Promise.race([
-      printer.send(buffer),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Print job timed out after 30 s')), JOB_TIMEOUT_MS)
-      ),
-    ]);
+    for (let copy = 1; copy <= next.copies; copy++) {
+      // Race each physical copy against a timeout so a hung write never locks the queue.
+      await Promise.race([
+        printer.send(buffer),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Print copy ${copy} timed out after 30 s`)), JOB_TIMEOUT_MS)
+        ),
+      ]);
+      if (copy < next.copies) await _delay(COPY_DELAY_MS);
+    }
     next.status     = 'done';
     next.finishedAt = new Date().toISOString();
   } catch (err) {
@@ -159,6 +181,13 @@ function _buildBuffer(job) {
       case 'receipt': return y50Raster.receipt(job.data);
       case 'label':   return y50Raster.receipt(job.data); // same format for now
       case 'test':    return y50Raster.testPrint();
+      default:        throw new Error(`Unknown job type: ${job.type}`);
+    }
+  } else if (_printerUsesWindowsUsbRaster()) {
+    switch (job.type) {
+      case 'receipt': return escpos.receiptRaster(job.data, { printWidthPx: DEFAULT_80MM_PRINT_WIDTH_PX });
+      case 'label':   return escpos.receiptRaster(job.data, { printWidthPx: DEFAULT_80MM_PRINT_WIDTH_PX });
+      case 'test':    return escpos.testPrintRaster({ printWidthPx: DEFAULT_80MM_PRINT_WIDTH_PX });
       default:        throw new Error(`Unknown job type: ${job.type}`);
     }
   } else {
